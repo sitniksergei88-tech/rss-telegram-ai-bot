@@ -1,0 +1,41 @@
+﻿name: RSS News Monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run RSS Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+        run: node src/index.js
+      
+      - name: Commit changes
+        run: |
+          git config user.email "bot@telegram.local"
+          git config user.name "RSS Bot"
+          git add dedup_state.json failed_posts.json || true
+          git commit -m "Auto-update: $(date -u +'%Y-%m-%d %H:%M:%S') UTC" || true
+          git push origin main || true
