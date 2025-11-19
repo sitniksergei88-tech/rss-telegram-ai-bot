@@ -1,66 +1,87 @@
-﻿export async function sendToTelegram(items) {
+const fetch = require('node-fetch');
+const FormData = require('form-data');
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
+
+async function downloadImage(imageUrl, filepath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(filepath);
+    https.get(imageUrl, (response) => {
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve(filepath);
+      });
+    }).on('error', (err) => {
+      fs.unlink(filepath, () => {}); // удаляем файл при ошибке
+      reject(err);
+    });
+  });
+}
+
+async function sendToTelegram(post) {
   const token = process.env.TELEGRAM_TOKEN;
   const channelId = process.env.CHANNEL_ID;
-
+  
   if (!token || !channelId) {
-    console.error('[Telegram]  Missing TELEGRAM_TOKEN or CHANNEL_ID');
-    return [];
+    console.error('Missing TELEGRAM_TOKEN or CHANNEL_ID');
+    return;
   }
-
-  function escapeHTML(text) {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function formatMessage(item) {
-    const text = `<b>${escapeHTML(item.title)}</b>\n\n${escapeHTML(item.rewritten)}\n\n<a href="${item.link}">Читать полностью</a>`;
-    return text;
-  }
-
-  const results = [];
-  const failed = [];
-
-  for (const item of items) {
-    try {
-      const message = formatMessage(item);
-
-      const response = await fetch(
-        `https://api.telegram.org/bot${token}/sendMessage`,
-        {
+  
+  try {
+    let messageText = `<b>${post.title}</b>\n\n${post.text}`;
+    
+    // Если есть изображение - отправляем с фото
+    if (post.image) {
+      try {
+        const tempImagePath = path.join('/tmp', `img_${Date.now()}.jpg`);
+        await downloadImage(post.image, tempImagePath);
+        
+        const form = new FormData();
+        form.append('chat_id', channelId);
+        form.append('photo', fs.createReadStream(tempImagePath));
+        form.append('caption', messageText);
+        form.append('parse_mode', 'HTML');
+        
+        const response = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+          method: 'POST',
+          body: form
+        });
+        
+        fs.unlink(tempImagePath, () => {}); // удаляем временный файл
+        
+        if (!response.ok) {
+          console.error(`Telegram error: ${response.statusText}`);
+        }
+      } catch (imgError) {
+        // Если ошибка с изображением - отправляем просто текст
+        console.warn(`Image error: ${imgError.message}, sending text only`);
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: channelId,
-            text: message,
-            parse_mode: 'HTML',
-            disable_web_page_preview: false
-          }),
-          timeout: 15000
-        }
-      );
-
-      if (response.ok) {
-        results.push({ link: item.link, status: 'sent' });
-        console.log(`[Telegram]  Sent: ${item.title.substring(0, 50)}`);
-      } else {
-        const error = await response.json();
-        failed.push({ ...item, reason: error.description });
-        console.error(`[Telegram]  Failed: ${error.description}`);
+            text: messageText,
+            parse_mode: 'HTML'
+          })
+        });
       }
-    } catch (error) {
-      failed.push({ ...item, reason: error.message });
-      console.error(`[Telegram]  Error:`, error.message);
+    } else {
+      // Отправляем просто текст
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: channelId,
+          text: messageText,
+          parse_mode: 'HTML'
+        })
+      });
     }
-
-    await new Promise(r => setTimeout(r, 500));
+  } catch (error) {
+    console.error(`Error sending to Telegram: ${error.message}`);
   }
-
-  if (failed.length > 0) {
-    console.log(`[Telegram]  ${failed.length} items failed`);
-  }
-
-  return results;
 }
+
+module.exports = { sendToTelegram };
