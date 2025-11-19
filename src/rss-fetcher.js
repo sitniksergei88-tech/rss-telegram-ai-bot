@@ -1,39 +1,41 @@
-﻿import fetch from 'node-fetch';
-import { parseStringPromise } from 'xml2js';
+const fetch = require('node-fetch');
+const xml2js = require('xml2js');
 
-export async function fetchRSSFeed(feedUrl) {
+async function fetchRSSFeed(feedUrl) {
   try {
-    console.log('[RSS Fetcher] Fetching from:', feedUrl);
+    const response = await fetch(feedUrl);
+    const xmlData = await response.text();
+    const parser = new xml2js.Parser();
+    const data = await parser.parseStringPromise(xmlData);
     
-    const response = await fetch(feedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      timeout: 15000
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const xmlText = await response.text();
-    const parsed = await parseStringPromise(xmlText);
+    const items = data.rss.channel[0].item || [];
+    const oneHourAgo = Date.now() - (60 * 60 * 1000); // 1 час назад
     
-    const items = parsed.rss?.channel?.[0]?.item || [];
-    
-    const result = items.map(item => ({
-      title: item.title?.[0] || 'No title',
-      link: item.link?.[0] || '',
-      description: item.description?.[0] || item.title?.[0] || '',
-      pubDate: item.pubDate?.[0] || new Date().toISOString(),
-      source: 'Lenta.ru'
-    }));
-
-    console.log(`[RSS Fetcher]  Found ${result.length} items`);
-    return result;
-
+    return items
+      .map(item => ({
+        title: item.title?.[0] || 'No title',
+        link: item.link?.[0] || '',
+        pubDate: item.pubDate?.[0] || '',
+        description: item.description?.[0] || '',
+        image: extractImageFromDescription(item.description?.[0] || '')
+      }))
+      .filter(item => {
+        // Только новые за последний час
+        const pubTime = new Date(item.pubDate).getTime();
+        return pubTime > oneHourAgo;
+      })
+      .slice(0, 10); // Максимум 10 новостей за раз
   } catch (error) {
-    console.error('[RSS Fetcher]  Error:', error.message);
+    console.error(`Error fetching RSS feed: ${error.message}`);
     return [];
   }
 }
+
+function extractImageFromDescription(description) {
+  // Ищем изображение в описании
+  const imgRegex = /<img[^>]+src=["']([^"']+)["']/;
+  const match = description.match(imgRegex);
+  return match ? match[1] : null;
+}
+
+module.exports = { fetchRSSFeed };
