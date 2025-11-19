@@ -1,7 +1,7 @@
-const fetch = require('node-fetch');
-const xml2js = require('xml2js');
+import fetch from 'node-fetch';
+import xml2js from 'xml2js';
 
-async function fetchRSSFeed(feedUrl) {
+export async function fetchRSSFeed(feedUrl) {
   try {
     const response = await fetch(feedUrl);
     const xmlData = await response.text();
@@ -9,7 +9,7 @@ async function fetchRSSFeed(feedUrl) {
     const data = await parser.parseStringPromise(xmlData);
     
     const items = data.rss.channel[0].item || [];
-    const oneHourAgo = Date.now() - (60 * 60 * 1000); // 1 час назад
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
     
     return items
       .map(item => ({
@@ -20,11 +20,10 @@ async function fetchRSSFeed(feedUrl) {
         image: extractImageFromDescription(item.description?.[0] || '')
       }))
       .filter(item => {
-        // Только новые за последний час
         const pubTime = new Date(item.pubDate).getTime();
         return pubTime > oneHourAgo;
       })
-      .slice(0, 10); // Максимум 10 новостей за раз
+      .slice(0, 10);
   } catch (error) {
     console.error(`Error fetching RSS feed: ${error.message}`);
     return [];
@@ -32,10 +31,7 @@ async function fetchRSSFeed(feedUrl) {
 }
 
 function extractImageFromDescription(description) {
-  // Ищем изображение в описании
   const imgRegex = /<img[^>]+src=["']([^"']+)["']/;
   const match = description.match(imgRegex);
   return match ? match[1] : null;
 }
-
-module.exports = { fetchRSSFeed };
